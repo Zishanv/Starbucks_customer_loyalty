@@ -1,0 +1,187 @@
+---
+title: "Starbucks Satisfaction"
+output: html_notebook
+---
+
+
+We will examine the factors that affect customer loyalty,customer spending and try to group customers based on similar characteristics
+
+First, we will import all the necessary libraries that we will likely need. If there are any libraries that are not included here, they will be added as we go along with our analysis.
+
+```{r}
+library(tidyverse)
+library(lattice)
+library(caret)
+library(corrplot)
+library(psych)
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+BiocManager::install("Biobase")
+install.packages("NMF")
+library(NMF)
+library(grid)
+library(ggthemes)
+library(gridExtra)
+library(knitr)
+```
+
+Next, we will load our csv files as dataframes for analysis
+
+```{r}
+data_cat=read.csv('Starbucks satisfactory survey.csv') # dataset 1 
+data=read.csv('Starbucks satisfactory survey encode cleaned.csv') # dataset 2
+```
+
+This line of code displays the size of both our datasets
+```{R}
+dim(data)
+dim(data_cat)
+```
+
+Our dataset has relatively few and no systematic missing values and have no pattern because each row is unqiue for a specific customer. Since we are looking at the big overall picture and clustering the data points, dropping a few rows that have missing values will not cause any potential consequences. Please note, there are ways that we handle missing data when there is a lot of missing data or if the data follows a pattern. In this case, we are okay with dropping any rows that have missing values or 'NA'.
+
+```{R}
+data <- na.omit(data)
+data_cat <- na.omit(data_cat)
+```
+
+Checking the size of the dataset after dropping rows with missing values. You will notice that the size of the dataset barely changed. There was only 1 row of missing value that was dropped.
+
+```{R}
+dim(data)
+dim(data_cat)
+```
+
+recoding loyal/disloyal customers. If the customer is not loyal then it will give it a 0, and if the customer is loyal, it will give it a value 1. We are also applying a function to identify variables in the dataframe that have very low variance, and then removing those variables. This step will remove variables that do not contribute much to the analysis and can be removed to simplify our dataset.
+
+
+```{R}
+data$loyal<- ifelse(data$loyal==0,0,1)
+data<-data[,-nearZeroVar(data)]
+```
+
+
+Display of the first 5 rows of the datafram
+```{r}
+head(data)
+```
+```{R}
+head(data_cat)
+```
+
+This step estimates the reliability of the set of variables fromcolumn 12 to 19. The resulting diagram will show the factor loadings for each variable on each of the three factors, as well as the composite reliability estimates for each factor. This can help to identify which variables are most strongly associated with each factor, and how reliable the factors are as a measure of the underlying construct.
+
+```{r}
+o <-omega(data[,12:19],nfactors=3,plot=F)
+omega.diagram(o,daigits = 2,main='Attributes of Brand Image')
+```
+This digram shows the relationship between different sets of variables onto different factors. We see that priceRate,ProductRate, Service Rate, WifeRate, and ambiance rate are significantly correlated to customer satisfaction. The variable loyal and promoRate do not influence customer satisfaction as much as the rest. We will dig into the correlation in more details below.
+
+
+Logistic Regression analysis: using the glm function, we are creating a regression analysis and predicting variables that are significant to our model and removing any varibales that are not significant. This prediction is made based on the threshold p-value of 0.5. We are also computing the confusion Matrix below to test our model's accuracy to see how well it performs to predict the True Positives and False Negatives.
+
+```{r}
+
+glm_fit <- glm(loyal~.,data,family='binomial')
+p <- predict(glm_fit,newdata=data,type='response')
+pred<-ifelse(p>0.5,1,0)
+tab<-table(Predicted=pred,Actual=data$loyal)
+confusionMatrix(tab)
+```
+
+This code below stores the coefficients of the significant variables and adds them to our new dataset, c
+```{r}
+c<-as.data.frame(glm_fit$coefficients)
+c$name <- rownames(c)
+colnames(c)[1] <- 'coef'
+c$odds <- exp(c$coef)
+c
+```
+
+We will now plot a bar graph of the factors that affect customer loyalty in descending order. We can see that the number of visits is highly correlated with loyalty. In other words, the higher the number of visits, the more loyal a cutomer is. On the otherhand, the amount of money that a customer spends is not very highly correlated to loyalty.
+
+```{r}
+options(repr.plot.width=13, repr.plot.height=13)
+
+c %>% filter(name!='(Intercept)' & name!='predict') %>% ggplot(aes(reorder(name,odds),odds)) + geom_bar(stat = 'identity') + geom_label(aes(label=round(odds,2)),size=3) + coord_flip() + theme_fivethirtyeight() + theme(axis.text=element_text(size=8),plot.subtitle = element_text(size=8),plot.caption = element_text(size=8),panel.grid.major = element_blank(),panel.grid.minor = element_blank()) +
+geom_hline(yintercept = 1,color='red',linetype='dashed') + labs(title = 'Factors Affecting Customers Loyalty (Odds Ratio)', subtitle = "factors with odds ratio greater than 1 positively affect loyalty", caption = "*** interpretation: a 1 unit increase in spending category increases the odds of loyalty by a factor of 12.48 ***")
+```
+
+Predicted Loyalty for Spending & Price Rating Categories
+```{R}
+a<-ggplot(data,aes(spendPurchase,loyal,color=loyal)) + geom_jitter(height = 0.01,alpha=0.5) + stat_smooth(method = 'glm',method.args = list(family='binomial'),se=FALSE) + scale_y_continuous(limits = c(0,1)) + theme(axis.text = element_text(size=12),plot.subtitle = element_text(size=12),plot.caption = element_text(size=12)) + 
+  labs(title='How Spending Affects Loyalty',subtitle = "x:Spending,y:Loyalty") + theme_fivethirtyeight()
+```
+
+```{r}
+
+ b<-ggplot(data,aes(priceRate,loyal,color=loyal)) + geom_jitter(height = 0.01,alpha=0.5) + stat_smooth(method = 'glm',method.args = list(family='binomial'),se=FALSE) + scale_y_continuous(limits = c(0,1)) + theme(axis.text = element_text(size=12),plot.subtitle = element_text(size=12),plot.caption = element_text(size=12)) + 
+  labs(title='How Price Rating Affects Loyalty',subtitle = "x:Price Rating,y:Loyalty") + theme_fivethirtyeight()
+```
+
+```{r}
+library('gridExtra')
+grid.arrange(a,b, nrow=1)
+```
+Based on the two plots above, we can see that when a customer's spending increases, their loyalty decreases. Also, as the price of the product increases, customer loyalty decreases. Therefore, customer spending and product price is inversely proportion of loyalty.
+
+
+Customer's Segmentation Using Matrix Factorization
+
+```{r}
+
+fit<- nmf(data[,-1],5,'lee',seed=14)
+options(repr.plot.width=20, repr.plot.height=20)
+ht<- grid.grabExpr(coefmap(fit,color="YlOrRd:50",scale='c1',main='Decomposing Survey to 5 groups',fontsize=7,cexCol=2/1,cexRow=2/1,tracks=NA))
+grid.newpage()
+pushViewport(viewport(angle = 90))
+grid.draw(ht) 
+popViewport()
+```
+
+The plots are seen much more clearly when running them from console and seeing them in the plots on the right >
+
+Based on the results of the heatmap, we can see that cluster 5 shows highest loyalty and cluster 1 shows the lowest loyaty. 
+We can also conclude that the highest ratings of services and biggest spending is seen from customers in cluster 5.
+
+
+Clustering customers based on similar characteristics
+
+```{R}
+
+w <- basis(fit)
+type <- max.col(w)
+data$cluster <- type
+head(data)
+```
+
+```{r}
+cluster <- data %>% group_by(cluster) %>% summarise(n=n(),status=median(status),AGE=mean(age), STATUS=median(status), AGE=mean(age), SPEND=median(spendPurchase),PRICE=round(mean(priceRate),1), SERVICE=round(mean(serviceRate),1),AMBIANCE=round(mean(ambianceRate),1), LOYAL=round(mean(loyal),1))
+```
+#recoding categorical variables for better readability
+```{r}
+cluster[,'AGE'] <-c("20 to 29","20 to 29","20 to 29","20 to 29","20 to 29")
+cluster[,'STATUS'] <- c("employed","student","employed","employed","student")
+cluster[,'SPEND'] <- c("less than 20","less than 20","less than 20","20 to 40","20 to 40")
+kable(cluster,caption = 'Groups of Customers After Clustering')
+```
+n: the number of customers in each cluster
+status: a categorical variable indicating the employment or student status of the customer
+AGE: a categorical variable indicating the age range of the customer
+STATUS: a categorical variable indicating the employment status of the customer
+SPEND: a categorical variable indicating the amount spent by the customer
+PRICE: a numerical variable indicating the customer's rating of the price of the service
+SERVICE: a numerical variable indicating the customer's rating of the quality of service
+AMBIANCE: a numerical variable indicating the customer's rating of the ambiance of the service location
+LOYAL: a numerical variable indicating the customer's rating of their loyalty to the service.
+
+
+From the dataframe above, we can conclude that customers who are between the age of 20 to 29, employed, who spend less than $20, rates their service as 3.3 out to 5, Ambiance rate of 3.4 out of 5 are the most loyal customers. Ambiance and price are very significant when it comes to loyal customers.
+
+
+
+
+
+
+
+
